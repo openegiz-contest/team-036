@@ -1,43 +1,51 @@
-# <Team name>: a digital mine on OpenEgiz
+# OpenPit Twin — цифровой двойник открытого карьера
 
-> Team Repository of the contest “Digital Mine on OpenEgiz”. **Replace the contents of this file with the instructions for your Submission.** The AI Jury runs the Submission strictly by these instructions, from scratch, in the Judge Environment. Accepted languages: English, Kazakh, Russian.
+Проект конкурса OpenEgiz: цифровой двойник карьера для диспетчеризации шести самосвалов, балансировки двух экскаваторов и сокращения ожидания. Объекты представлены двойниками Eclipse Ditto; телеметрия идёт по штатному пути OpenEgiz через MQTT.
 
-> **Start with the Concept**, the first section of [SUBMISSION.md](SUBMISSION.md): the Team writes it before any code. What AI agents build from this Template without a Concept is the Default Solution, published on the [contest site](https://openegiz-contest.github.io/) as the low bar: a Submission that does not go beyond it gets low levels in the Rubric. AI agents read [AGENTS.md](AGENTS.md).
+## Требования
 
-## Running
+- Ubuntu 22.04/24.04 или другая поддерживаемая Linux-среда
+- Docker Engine с Compose v2, `git`, `make`
+- Не менее 6 ГБ памяти Docker
+- Свободные порты платформы (в частности Grafana 3000, MQTT 1883 и Ditto API 8080)
 
-Requirements (Docker, `make`, Windows/WSL2 setup) are in [OPENEGIZ.md](OPENEGIZ.md) / [OPENEGIZ.ru.md](OPENEGIZ.ru.md).
+## Запуск с нуля
+
+Из корня репозитория:
 
 ```bash
-sudo apt install -y make   # if make is missing (clean Ubuntu)
-make up            # the OpenEgiz platform
-make example-mine  # the Example Mine: twins, simulator, dashboard
+sudo apt update
+sudo apt install -y make
+make openpit-twin
 ```
 
-Replace these commands with the commands of your Submission. The Submission must start by following these instructions without manual intervention (Rules, clause 6.4); downloading datasets and models and building are also listed here.
+Первый запуск скачивает образы и собирает сервисы, поэтому может занять несколько минут. Команда запускает платформу OpenEgiz, создаёт двойники и включает симулятор и дашборд.
 
-## What to open
+В конце откройте адрес Grafana, напечатанный командой (обычно `http://localhost:3000`). Логин `admin`; пароль указан в выводе `make up`. Затем перейдите в **Dashboards → OpenEgiz Examples → OpenPit Twin — Dispatch Control**. Живая пространственная схема доступна по адресу `http://localhost:8091/`. Сами объекты доступны в приложении **OpenEgiz → Twins**.
 
-- Grafana: the address and login are printed by `make up`.
-- <where to see the mine visualization, which dashboards>
+## Сценарии «что если»
 
-## Repository contents
+По умолчанию используется обычный режим. Для проверки сценариев остановите только симулятор и запустите его с нужной переменной:
 
-| Path | Contents |
-|---|---|
-| `team/` | Directory for the Team's code. Using it is optional: any part may be changed, including the platform core |
-| `SUBMISSION.md` | Description of the Submission: **required** |
-| `presentation.pdf` | Presentation: **required**, in the repository root |
-| `AGENTS.md`, `CLAUDE.md` | Instructions for your AI agents (Codex, Claude Code and others read them automatically) |
-| `examples/mine/` | The Example Mine: shows how a digital mine is built on OpenEgiz. It is not a basis for the Submission |
-| `OPENEGIZ.md`, `OPENEGIZ.ru.md` | Documentation of the OpenEgiz platform v1.0.4 |
+```bash
+docker compose --env-file deploy/compose/.env -f deploy/compose/docker-compose.yml -f team/openpit/compose.yml stop openpit-simulator
+OPENPIT_SCENARIO=road_closure docker compose --env-file deploy/compose/.env -f deploy/compose/docker-compose.yml -f team/openpit/compose.yml up -d --force-recreate openpit-simulator
+```
 
-The Submission is the `main` branch at the moment of the Freeze; other branches are not evaluated.
+Варианты `OPENPIT_SCENARIO`: `normal`, `road_closure`, `excavator_failure`. Вернуть обычный режим — повторить команду запуска с `OPENPIT_SCENARIO=normal`.
 
-## License
+## Проверка
 
-The Submission is distributed under the MIT license, see [LICENSE](LICENSE). Copyright belongs to the Team: add the line `Copyright (c) 2026 <Team members>` to `LICENSE`.
+```bash
+make ps
+make smoke
+docker compose --env-file deploy/compose/.env -f deploy/compose/docker-compose.yml -f team/openpit/compose.yml logs --tail=100 openpit-simulator
+```
 
----
+Остановить платформу и удалить данные можно командой `make clean`. Она удаляет локальные данные платформы и пароли — используйте осторожно.
 
-Platform: [aleka07/openegiz](https://github.com/aleka07/openegiz). If the platform was useful to you, support the project with a star on GitHub.
+## Архитектура
+
+`team/openpit/twins.json` → `setup_twins.py` → Eclipse Ditto; `simulator.py` → MQTT → Ditto → Telegraf → InfluxDB → Grafana. `scene.py` читает актуальные двойники через Ditto API и отображает пространственную схему карьера. Симуляция использует синтетические параметры и предназначена для демонстрации, а не для реального управления техникой.
+
+Дополнительное описание и ограничения — в `SUBMISSION.md`.

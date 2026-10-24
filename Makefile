@@ -1,4 +1,4 @@
-.PHONY: up down ps logs smoke clean example-mine example-mine-stop install uninstall status endpoints upgrade upload-build generate-data copy-build unity-demo check-secrets check-public-host
+.PHONY: up down ps logs smoke clean openpit-twin openpit-stop example-mine example-mine-stop install uninstall status endpoints upgrade upload-build generate-data copy-build unity-demo check-secrets check-public-host
 
 # ---------------------------------------------------------------------------
 # Docker Compose deployment (laptops, CI, contest judges): deploy/compose/
@@ -53,6 +53,15 @@ example-mine-stop:
 clean:
 	$(COMPOSE) down -v --remove-orphans
 	rm -f deploy/compose/.env $(MINE_MARKER)
+
+
+## OpenPit Twin contest submission (built on the official OpenEgiz platform)
+openpit-twin: up
+	docker compose --env-file deploy/compose/.env -f deploy/compose/docker-compose.yml -f team/openpit/compose.yml up -d --build --wait --wait-timeout 300
+	@echo "OpenPit Twin running: Grafana -> Dashboards -> OpenEgiz Examples -> OpenPit Twin — Dispatch Control"
+
+openpit-stop:
+	docker compose --env-file deploy/compose/.env -f deploy/compose/docker-compose.yml -f team/openpit/compose.yml stop openpit-simulator
 
 # ---------------------------------------------------------------------------
 # Helm deployment (servers): the chart at the repository root
