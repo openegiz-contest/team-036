@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash#!/bin/bash
 DITTO_DEVOPS_USER_PW="${DEVOPS_USER}:${DEVOPS_PASSWORD}"
 DITTO_CONNECTIONS_BASE_URL="http://${DITTO_HOST}-nginx:${DITTO_NGINX_PORT}/api/2/connections"
 DITTO_THINGS_BASE_URL="http://${DITTO_HOST}-nginx:${DITTO_NGINX_PORT}/api/2/things"
