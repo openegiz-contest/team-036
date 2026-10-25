@@ -1,0 +1,58 @@
+# Digital pit: an overlay on deploy/compose/docker-compose.yml, started by `make digital-pit`.
+# Relative paths are resolved from deploy/compose/ (the first compose file).
+
+services:
+  pit-setup:
+    build: ../../team
+    image: openegiz/digital-pit:local
+    restart: "no"
+    command: ["python", "setup_twins.py"]
+    environment:
+      DITTO_URL: http://ditto-nginx:80
+      DITTO_PASSWORD: ${DITTO_PASSWORD}
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  # Same image as pit-setup (built once; see the note in examples/mine/compose.yml).
+  pit-simulator:
+    image: openegiz/digital-pit:local
+    pull_policy: never
+    restart: unless-stopped
+    mem_limit: 192m
+    command: ["python", "simulator.py"]
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      SIM_SPEEDUP: ${PIT_SPEEDUP:-20}
+    depends_on:
+      pit-setup:
+        condition: service_completed_successfully
+
+  pit-console:
+    image: openegiz/digital-pit:local
+    pull_policy: never
+    restart: unless-stopped
+    mem_limit: 128m
+    command: ["python", "console/server.py"]
+    environment:
+      DITTO_URL: http://ditto-nginx:80
+      DITTO_PASSWORD: ${DITTO_PASSWORD}
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      PORT: "8099"
+    ports:
+      - "${OPENEGIZ_BIND:-127.0.0.1}:${PIT_PORT:-8099}:8099"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8099/healthz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    depends_on:
+      pit-setup:
+        condition: service_completed_successfully
+
+  grafana:
+    volumes:
+      - ../../team/dashboard.json:/var/lib/grafana/example-dashboards/digital-pit.json:ro

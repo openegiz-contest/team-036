@@ -1,66 +1,101 @@
-# SUBMISSION — OpenPit Twin
+# SUBMISSION
 
-## Concept
+## Замысел (Concept)
 
-**Enterprise:** Open-pit copper mine with two loading faces, a six-truck haulage fleet, two haul roads and a shared dump/crusher-feed point. The model is a clearly labelled synthetic reference case, not a claim to reproduce a named mine.
+**Предприятие:** открытый карьер медно-рудного типа «Алтын-Тау» (вымышленный): рудный и вскрышной забои, две рампы, первичная дробилка, ROM-площадка, породный отвал. Двойник представляет **транспортный цикл карьера**: забой → самосвал → дробилка / ROM / отвал.
 
-**Users:** Shift dispatcher, haulage supervisor and mine operations engineer.
+**Пользователи:** диспетчер карьера (смены) и горный инженер, который планирует парк и порядок работ.
 
-**Decision:** Every dispatch cycle, choose which loading face should receive each available truck, considering travel distance, queue length, road restrictions, excavator availability and truck fuel. The dispatcher can compare normal operation with a road closure or an excavator outage.
+**Решение:** какой самосвал отправить в какой забой и куда везти груз прямо сейчас, чтобы сократить простои самосвалов в очередях и не оставить без руды дробилку. Двойник показывает, что произойдёт при отказе экскаватора, закрытии рампы, остановке дробилки, дожде, взрыве и поломке самосвала, и сколько простоя и руды стоит решение диспетчера по сравнению с фиксированной раскладкой.
 
-**Why this choice:** Truck queues and poorly balanced assignments create avoidable waiting for both trucks and excavators. A connected fleet model makes the operational consequences visible and gives the dispatcher an actionable assignment rather than a passive dashboard.
+**Почему именно так:** простои самосвалов в очередях у экскаваторов и дробилки — одна из самых больших управляемых потерь карьерного транспорта, а решение диспетчера принимается каждые несколько минут при неполной информации. Это задача, где цифровой двойник даёт ответ «что будет, если», а не просто красивую картинку. Выбор сделан командой: диспетчеризация самосвалов и сокращение простоев (тема, заданная командой).
 
-**Real or fictional:** Fictional, inspired by conventional open-pit truck-and-shovel operations. All dimensions and cycle times are declared synthetic assumptions in `team/openpit/simulator.py`; they are intended for demonstration and must be calibrated against site dispatch logs before operational use.
+**Реальный или вымышленный:** объект вымышленный. Он похож на средние медные карьеры Казахстана и мира по масштабу (глубина 165 м, уступы 15 м, рампы 5-9 % уклона, самосвалы грузоподъёмностью 100 т, экскаваторы с ковшом 12-15 м³, дробилка около 2500 т/ч). Числа взяты как **типовые значения классов оборудования** из справочной литературы и паспортов производителей (точные модели не заявляются), см. «Данные и допущения». Реального объекта с источниками цифр у команды нет.
 
-## Team
+## Команда
 
 | GitHub |
 |---|
-| <!-- Add the registered participant GitHub username(s) before submission. --> |
+| peacedauren |
 
-## Mine
+## Карьер (Mine)
 
-The OpenPit Twin uses the OpenEgiz platform and Eclipse Ditto things in namespace `org.openegiz.openpit`. Definitions are in `team/openpit/twins.json`; state updates are published by `team/openpit/simulator.py` as Ditto protocol `modify` messages over MQTT. The platform's normal MQTT → Ditto → Telegraf → InfluxDB → Grafana pipeline is retained.
+Часть предприятия: **открытый карьер с дробильным узлом**, 34 двойника в Eclipse Ditto, пространство `org.openegiz.pit`. Определены в `team/pit/twins.py`, геометрия в `team/pit/geometry.py`, поведение в `team/pit/sim.py`.
 
-Twin types and relationships:
-- `pit-01`: mine-level totals and current dispatch mode.
-- `excavator-01`, `excavator-02`: loading state, queue, face grade, loaded tonnage and idle time.
-- `truck-01` … `truck-06`: state, assignment, payload, speed, route progress, fuel, completed trips and wait time.
-- `road-01`, `road-02`: availability, traffic factor, traffic count and estimated travel time.
-- `dump-01`: received tonnage, throughput and queue.
+| Тип | Двойники | Основные features |
+|---|---|---|
+| Карьер | `pit-01` | `clock`, `weather`, `view`, `ore_hauled_t`, `waste_t`, `feed_grade`; в атрибутах параметры чаши карьера |
+| Диспетчер | `dispatcher-01` | KPI «с диспетчером / без» (`idle_pct_*`, `ore_rate_*`, `crusher_starved_*`), `idle_saved_h`, `ore_gain_t`, `decision_log`, `sc_*` (активные сценарии) |
+| Самосвалы (11) | `truck-01…11` | `state` (9 состояний), `payload`, `speed`, `position` (x, y, z, курс), `segment`, `shovel`, `destination`, `fuel`, `idle_s`, `cycle_min` |
+| Экскаваторы (3) | `shovel-01…03` | `state`, `queue_len`, `current_truck`, `utilization_pct`, `starved_pct`, `tonnes_total` |
+| Забои (3) | `face-f1…f3` | `state` (открыт / взрыв / отказ), `grade` (% Cu, случайное блуждание), `mined_t`, `remaining_t` |
+| Дороги (12) | `road-*` | `status` (open / slow / closed), `trucks_on`, `speed_factor`; в атрибутах полилиния, длина, уклон, лимит скорости |
+| Дробилка | `crusher-01` | `state`, `bin_level_t`, `bin_pct`, `queue_len`, `throughput_tph`, `feed_grade`, `starved_pct` |
+| ROM-площадка, отвал | `rompad-01`, `wastedump-01` | `stock_t`, `queue_len`, `tonnes_total` |
 
-Every equipment/road/dump twin references the pit through `attributes._parents`. Truck states progress through dispatch, travel to loader, loading, loaded haul, dumping, return and refuelling. The dispatcher assigns an available truck to the face with the lowest estimated cost; road and equipment disruptions affect that cost.
+Связи: все двойники имеют `_parents = org.openegiz.pit:pit-01`; самосвал → забой (`shovel`) → пункт разгрузки (`destination`); самосвал → дорога (`segment`) → `road-*`; забой ↔ экскаватор (`face`). Телеметрия: симулятор → MQTT `telemetry/<имя>` → Ditto → Telegraf → InfluxDB → Grafana.
 
-## Modules and What-if Scenarios
+## Модули и сценарии «что если»
 
-| Module or scenario | What it does | How to see it on the Stand | How to undo it |
+**Модуль 1. Диспетчер самосвалов** (транспорт и диспетчеризация). Когда самосвал освобождается, диспетчер выбирает экскаватор по минимуму суммы: ожидание в очереди + 0,7 × простой экскаватора + 0,12 × время подъезда + штрафы за отклонение от плана (доля вскрыши 30 %, содержание Cu в питании дробилки 0,72 %). Решение пересматривается на каждой развилке (гистерезис 90 с). Гружёный самосвал с рудой направляется на ROM-площадку, если очередь у дробилки или бункер делают это выгоднее. Каждое решение с причиной попадает в `decision_log`.
+**Модуль 2. Сравнение с базой в реальном времени (теневой мир).** Параллельно считается тот же карьер с теми же случайными потоками и сценариями, но с фиксированным назначением (лучшая раскладка 4-4-3, найденная перебором). Стенд показывает разницу простоя, руды и простоя дробилки.
+**Модуль 3. Показатели простоев и дашборд Grafana** (очереди у экскаваторов и дробилки, бункер, топливо).
+
+| Модуль или сценарий | Что делает | Как увидеть на стенде | Как отменить |
 |---|---|---|---|
-| Haulage and dispatch | Assigns waiting trucks using queue, travel time and penalties; publishes assignments and truck states | Open OpenEgiz → Twins and Grafana → Dashboards → OpenPit Twin — Dispatch Control | Restart with `OPENPIT_SCENARIO=normal` |
-| Fleet and loading model | Six trucks, two excavators, road links and dump point with connected state | Twin list; Grafana panels; simulator logs | Restart simulator |
-| Spatial dispatch view | Live 2D mine map with road paths, truck markers, excavators, dump point and disruption highlighting; reads current twin state from Ditto API | Open `http://localhost:8091/` | Refreshes automatically every 2 seconds |
-| What-if: road closure | `road-01` is marked closed and its travel time/dispatch cost rises; new assignments favour the other route | Launch using `OPENPIT_SCENARIO=road_closure`; inspect road and truck twins | `OPENPIT_SCENARIO=normal` |
-| What-if: excavator outage | `excavator-01` reports out of service and assignments are penalized, redirecting new trucks to the second face | Launch using `OPENPIT_SCENARIO=excavator_failure`; inspect excavator and truck twins | `OPENPIT_SCENARIO=normal` |
+| Диспетчер самосвалов | Назначает экскаватор и пункт разгрузки, перенаправляет на развилках | http://localhost:8099, блок «Решения диспетчера»; на карте у самосвалов меняется цвет по состоянию | — |
+| Сравнение с базой | Показывает эффект диспетчера за последний час и накопленный | Блок «Эффект диспетчера», переключатель «С диспетчером / Без диспетчера» | — |
+| Закрыть рампу А | Основная рампа закрыта, трафик идёт по длинной рампе Б | Кнопка «Закрыть основную рампу А»; дорога краснеет, самосвалы едут по Б | Нажать ту же кнопку |
+| Дождь | Скорости −28 % на карьерных, −15 % на поверхностных дорогах, погрузка +12 % | Кнопка «Дождь»; бейдж «дождь», дороги бурые | Нажать ту же кнопку |
+| Отказ экскаватора Э-2 | Экскаватор забоя F2 встаёт; диспетчер переводит самосвалы, база держит очередь 15 мин | Кнопка «Отказ экскаватора Э-2»; подпись «отказ», рост простоя «без диспетчера» | Нажать ту же кнопку |
+| Остановка дробилки | Дробилка стоит; диспетчер везёт руду на ROM, база стоит в очереди | Кнопка «Остановка дробилки»; «ОСТАНОВЛЕНА», рост запаса ROM | Нажать ту же кнопку |
+| Взрыв на F1 | Забой F1 закрыт, красная зона | Кнопка «Взрыв на F1»; мигающая красная зона | Нажать ту же кнопку |
+| Поломка самосвала БелАЗ-07 | Самосвал выводится из работы | Кнопка «Поломка самосвала»; серый статус «поломка» в таблице парка | Нажать ту же кнопку |
 
-Scenarios are selected through the simulator environment variable before launch; no code edits are needed. They are deterministic enough for repeatable demonstrations, while individual fuel levels include seeded variation.
+Последствия распространяются по двойникам: сценарий меняет `road-*`, `shovel-*`, `face-*`, `crusher-01`, затем очереди, `state` самосвалов, `rompad-01` и KPI в `dispatcher-01`.
 
-## What works and what does not
+### Результаты (пакетная проверка, `make pit-test`, синтетические данные)
 
-Implemented in code: twin definitions, MQTT telemetry publisher, six-truck state machine, two loading faces, two road twins, dynamic assignment, fuel consumption/refuelling, dump throughput, and two disruption modes. The dashboard JSON is provided with panels for mine totals, truck state, queue and road travel time.
+Среднее по 5 случайным потокам, окно 3 часа после включения сценария; «простой» — доля времени парка в очередях и ожидании.
 
-Not verified in this authoring environment: a full Docker deployment, live Ditto ingestion, Grafana panel queries and the clean Ubuntu judge run. These must be checked on the target machine using the README instructions. The model is a demonstration simulator, not a safety-critical dispatch controller.
+| Условие | Простой, диспетчер | Простой, база | Руда т/ч, диспетчер | Руда т/ч, база | Дробилка без руды, диспетчер | Дробилка без руды, база |
+|---|---|---|---|---|---|---|
+| штатно | 7,7 % | 8,9 % | 2560 | 2416 | 0,5 % | 3,8 % |
+| рампа А закрыта | 6,7 % | 6,6 % | 2040 | 2026 | 12,2 % | 18,6 % |
+| дождь | 5,8 % | 5,9 % | 2032 | 1951 | 13,0 % | 21,6 % |
+| отказ экскаватора Э-2 | 16,0 % | 31,0 % | 1604 | 1231 | 28,5 % | 48,7 % |
+| остановка дробилки | 7,3 % | 71,7 % | 2608 (часть на ROM) | 34 | n/a | n/a |
+| взрыв на F1 | 29,1 % | 32,7 % | 1685 | 1485 | 26,0 % | 38,8 % |
+| поломка самосвала | 6,4 % | 7,2 % | 2389 | 2161 | 2,8 % | 12,6 % |
 
-## Data and Assumptions
+Вывод: при лучшей возможной фиксированной раскладке в штатном режиме выигрыш диспетчера небольшой (около 1 п.п. простоя, +6 % руды); основная ценность — при нарушениях (отказ экскаватора, остановка дробилки, поломка). При закрытии рампы А и дожде преимущества нет: парк ограничен длиной рейса, и диспетчер на простой почти не влияет.
 
-No external dataset is redistributed. Synthetic assumptions: truck payload 90 t; loaded speed about 21–24 km/h; empty speed about 32 km/h; haul road lengths 2.4 km and 3.1 km; loading cycle 150 simulated seconds; dump cycle 45 simulated seconds; two loading faces and six trucks. Simulation time is accelerated for demonstration. Parameters are illustrative and should be replaced with mine-specific fleet, road, cycle-time and dispatch data for operational use.
+## Что работает и что нет
 
-## Mine visualization
+Проверено на этапе разработки: симулятор и тесты (`make pit-test`: 8 тестов, детерминизм, лимиты, обратимость сценариев); цепочка симулятор → MQTT → хранилище двойников в формате Ditto → консоль → стенд в браузере с реальными кликами по сценариям и переключением миров; сценарии возвращаются в исходное состояние при отмене.
+Известные ограничения и неготовое: нет перемещения экскаваторов между уступами и графика взрывных работ; расчётное время решения диспетчера не оптимизируется глобально (жадный алгоритм с пересмотром на развилках); накопленные показатели (`idle_saved_h`, `ore_gain_t`) считаются с начала смены и включают периоды разных сценариев. Поломка самосвала на трассе не блокирует полосу.
+<!-- КОМАНДА: перед заморозкой запустите `make digital-pit` в Окружении судьи (чистая Ubuntu 24.04 с Docker) и приведите этот раздел в соответствие с результатом `make pit-check`. -->
 
-Grafana dashboard `OpenPit Twin — Dispatch Control` is provisioned in the `OpenEgiz Examples` folder. `team/openpit/scene.py` serves a live spatial schematic at `http://localhost:8091/`; it polls Eclipse Ditto and places six truck markers on two haul routes, highlights a closed road and lists live fleet states. The OpenEgiz Twins application exposes the underlying twin states. The scene is a 2D schematic, not a surveyed or 3D terrain model.
+## Данные и допущения
 
-## Limitations
+- Все данные **синтетические**, моделируются симулятором; реальные и конфиденциальные данные, персональные данные не используются.
+- Параметры оборудования — типовые значения классов техники: самосвал 100 т, экскаватор с ковшом около 21 т породы за проход, цикл экскаватора 35-40 с, подача под погрузку около 1 мин, разгрузка 70-100 с, дробилка около 2500 т/ч, бункер 600 т. Скорости самосвалов на подъёме падают с ростом уклона (груженый 38 − 2,8·уклон км/ч, порожний 46 − 1,5·уклон), на спуске груженый ограничен 25 км/ч. Источники: справочная литература по карьерному транспорту и открытые данные производителей техники этого класса; точные значения конкретных моделей не заявляются.
+- Содержание меди в забоях (F1 0,95 %, F2 0,52 % Cu) — типовые для медных руд, меняется случайным блужданием.
+- Случайность: время погрузки (логнормальное, коэффициент вариации около 16 %), шум скорости ±6 %, технологические паузы экскаваторов (в среднем одна за 2 часа по 4-10 мин). Начальное состояние — 3 ч прогона до первой публикации.
+- Наборы данных из внешних источников не загружаются.
 
-The simulator uses a simplified two-route network, approximate cycle times and a heuristic dispatcher rather than a calibrated optimization solver. It does not model collision avoidance, road grades, payload variance, shift calendars, maintenance schedules, blasting exclusion zones or safety interlocks. The dashboard, spatial scene and live integration require end-to-end verification before judging. No operational decision should be based on this synthetic model.
+## Визуализация рудника
 
-## Presentation
+http://localhost:8099 (консоль проекта, Docker-сервис `pit-console`). 3D-карьер на three.js: ступенчатая чаша 165 м, вырезанные в стенах рампы, забои с маркерами содержания Cu, экскаваторы, дробилка с бункером, ROM-куча (масштаб по запасу), отвал, 11 самосвалов с плавным движением и цветом по состоянию, красная зона взрыва, цвет дорог по статусу. Рельеф и дороги строятся по атрибутам двойников из Ditto. Справа: сравнение с диспетчером и без, сценарии, журнал решений, таблицы парка и экскаваторов. Дополнительно дашборд Grafana «Цифровой карьер: диспетчеризация».
 
-See `presentation.pdf` in the repository root.
+## Ограничения
+
+Модель одной вертикальной очереди на забой и одного пункта дробления; нет пересечения встречных потоков на однополосных рампах (учитывается замедление от загруженности); результаты синтетические и не заменяют калибровку по данным реальной системы диспетчеризации.
+
+## Презентация
+
+`presentation.pdf` в корне репозитория. Видео (необязательно): —
+
+---
+
+Platform: OpenEgiz v1.0.4.

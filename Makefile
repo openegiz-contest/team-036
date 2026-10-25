@@ -1,4 +1,4 @@
-.PHONY: up down ps logs smoke clean openpit-twin openpit-stop example-mine example-mine-stop install uninstall status endpoints upgrade upload-build generate-data copy-build unity-demo check-secrets check-public-host
+.PHONY: up down ps logs smoke clean example-mine example-mine-stop digital-pit pit-check pit-test install uninstall status endpoints upgrade upload-build generate-data copy-build unity-demo check-secrets check-public-host
 
 # ---------------------------------------------------------------------------
 # Docker Compose deployment (laptops, CI, contest judges): deploy/compose/
@@ -9,7 +9,10 @@ COMPOSE_BASE := docker compose -f deploy/compose/docker-compose.yml
 # `make clean` forgets it.
 MINE_MARKER  := deploy/compose/.example-mine
 MINE_COMPOSE := examples/mine/compose.yml
-COMPOSE := $(COMPOSE_BASE)$(if $(wildcard $(MINE_MARKER)), -f $(MINE_COMPOSE))
+# Same for the team's digital pit (team/compose.yml), started by `make digital-pit`.
+TEAM_MARKER  := deploy/compose/.digital-pit
+TEAM_COMPOSE := team/compose.yml
+COMPOSE := $(COMPOSE_BASE)$(if $(wildcard $(MINE_MARKER)), -f $(MINE_COMPOSE))$(if $(wildcard $(TEAM_MARKER)), -f $(TEAM_COMPOSE))
 
 ## Start the whole platform with Docker Compose (first run: generates credentials)
 up:
@@ -49,19 +52,26 @@ example-mine: up
 example-mine-stop:
 	$(COMPOSE_BASE) -f $(MINE_COMPOSE) stop mine-simulator
 
+## Digital pit (the contest Submission): platform + twins + simulator + 3D stand on http://localhost:8099
+digital-pit: up
+	$(COMPOSE_BASE) -f $(TEAM_COMPOSE) up -d --build --wait --wait-timeout 600
+	@touch $(TEAM_MARKER)
+	@bash scripts/pit-check.sh
+	@echo "Digital pit running: stand http://localhost:8099 | Grafana -> Dashboards -> OpenEgiz Examples -> Цифровой карьер"
+
+## Check that the digital pit works end to end (twins exist, telemetry flows, stand and scenarios respond)
+pit-check:
+	@bash scripts/pit-check.sh
+
+## Offline unit tests and dispatcher-vs-fixed validation (needs only Python 3)
+pit-test:
+	python3 team/tests/test_sim.py
+	python3 team/tests/batch.py
+
 ## Stop the platform and DELETE all its data and credentials
 clean:
 	$(COMPOSE) down -v --remove-orphans
-	rm -f deploy/compose/.env $(MINE_MARKER)
-
-
-## OpenPit Twin contest submission (built on the official OpenEgiz platform)
-openpit-twin: up
-	docker compose --env-file deploy/compose/.env -f deploy/compose/docker-compose.yml -f team/openpit/compose.yml up -d --build --wait --wait-timeout 300
-	@echo "OpenPit Twin running: Grafana -> Dashboards -> OpenEgiz Examples -> OpenPit Twin — Dispatch Control"
-
-openpit-stop:
-	docker compose --env-file deploy/compose/.env -f deploy/compose/docker-compose.yml -f team/openpit/compose.yml stop openpit-simulator
+	rm -f deploy/compose/.env $(MINE_MARKER) $(TEAM_MARKER)
 
 # ---------------------------------------------------------------------------
 # Helm deployment (servers): the chart at the repository root

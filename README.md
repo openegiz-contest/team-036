@@ -1,51 +1,65 @@
-# OpenPit Twin — цифровой двойник открытого карьера
+# Цифровой карьер «Алтын-Тау»: диспетчеризация самосвалов на OpenEgiz
 
-Проект конкурса OpenEgiz: цифровой двойник карьера для диспетчеризации шести самосвалов, балансировки двух экскаваторов и сокращения ожидания. Объекты представлены двойниками Eclipse Ditto; телеметрия идёт по штатному пути OpenEgiz через MQTT.
+Репозиторий команды конкурса «Цифровой рудник на OpenEgiz» (team-036). Цифровой двойник открытого карьера,
+который помогает диспетчеру распределять самосвалы по экскаваторам и пунктам разгрузки и сокращать простои.
+Описание решения, Замысел и допущения — в [SUBMISSION.md](SUBMISSION.md), презентация — `presentation.pdf`.
 
-## Требования
-
-- Ubuntu 22.04/24.04 или другая поддерживаемая Linux-среда
-- Docker Engine с Compose v2, `git`, `make`
-- Не менее 6 ГБ памяти Docker
-- Свободные порты платформы (в частности Grafana 3000, MQTT 1883 и Ditto API 8080)
-
-## Запуск с нуля
-
-Из корня репозитория:
+## Запуск (чистая Ubuntu 24.04 с Docker, без ручных шагов)
 
 ```bash
-sudo apt update
-sudo apt install -y make
-make openpit-twin
+sudo apt install -y make          # если make нет
+make digital-pit                  # платформа OpenEgiz + двойники + симулятор + 3D-стенд (первый запуск: 10-20 минут)
 ```
 
-Первый запуск скачивает образы и собирает сервисы, поэтому может занять несколько минут. Команда запускает платформу OpenEgiz, создаёт двойники и включает симулятор и дашборд.
+`make digital-pit` поднимает платформу (`make up`), создаёт 34 двойника в Eclipse Ditto, запускает симулятор
+(телеметрия идёт MQTT → Ditto → Telegraf → InfluxDB), консоль со стендом и дашборд Grafana, затем выполняет
+самопроверку (`make pit-check`). Остановка: `make down`, полная очистка: `make clean`.
 
-В конце откройте адрес Grafana, напечатанный командой (обычно `http://localhost:3000`). Логин `admin`; пароль указан в выводе `make up`. Затем перейдите в **Dashboards → OpenEgiz Examples → OpenPit Twin — Dispatch Control**. Живая пространственная схема доступна по адресу `http://localhost:8091/`. Сами объекты доступны в приложении **OpenEgiz → Twins**.
+## Что открыть
 
-## Сценарии «что если»
+| Что | Адрес | Что показывает |
+|---|---|---|
+| **3D-стенд карьера** | http://localhost:8099 | Карьер, рампы, самосвалы, экскаваторы, дробилка в 3D; показатели «с диспетчером / без»; кнопки сценариев «что если»; журнал решений диспетчера |
+| Grafana | адрес и логин печатает `make up` → Dashboards → OpenEgiz Examples → «Цифровой карьер: диспетчеризация» | KPI простоев, руда, очереди, бункер дробилки, топливо |
+| Twins в Grafana | приложение **OpenEgiz** → Twins | 34 двойника карьера (`org.openegiz.pit:*`) |
 
-По умолчанию используется обычный режим. Для проверки сценариев остановите только симулятор и запустите его с нужной переменной:
+Стенд получает все данные из платформы (Ditto, через прокси консоли, ключи в браузер не попадают).
+Рельеф карьера и дороги строятся по атрибутам двойников (`pit-01`, `road-*`).
+
+## Как посмотреть сценарии «что если» (без изменения кода)
+
+На стенде справа, блок «Сценарии»: нажмите кнопку — сценарий включится, повторное нажатие отменит его.
+Переключатель «С диспетчером / Без диспетчера» вверху показывает на карте один из двух параллельных миров
+(одинаковые карьер, парк, случайные потоки и сценарии; отличается только способ назначения самосвалов).
+То же через командную строку:
 
 ```bash
-docker compose --env-file deploy/compose/.env -f deploy/compose/docker-compose.yml -f team/openpit/compose.yml stop openpit-simulator
-OPENPIT_SCENARIO=road_closure docker compose --env-file deploy/compose/.env -f deploy/compose/docker-compose.yml -f team/openpit/compose.yml up -d --force-recreate openpit-simulator
+curl -X POST -H 'Content-Type: application/json' -d '{"cmd":"scenario","name":"shovel_down","on":true}' http://localhost:8099/api/control
 ```
 
-Варианты `OPENPIT_SCENARIO`: `normal`, `road_closure`, `excavator_failure`. Вернуть обычный режим — повторить команду запуска с `OPENPIT_SCENARIO=normal`.
+Имена сценариев: `ramp_a_closed`, `rain`, `shovel_down`, `crusher_down`, `blast_f1`, `truck_down`.
+Скорость времени: кнопки ×10 … ×80 (по умолчанию ×20; смена 12 ч идёт 36 минут).
 
-## Проверка
+## Проверки
 
 ```bash
-make ps
-make smoke
-docker compose --env-file deploy/compose/.env -f deploy/compose/docker-compose.yml -f team/openpit/compose.yml logs --tail=100 openpit-simulator
+make pit-check    # на запущенном стенде: двойники, телеметрия, консоль, сценарий (идёт в make digital-pit)
+make pit-test     # без Docker, нужен только Python 3: модульные тесты + сравнение диспетчера с фиксированной раскладкой
 ```
 
-Остановить платформу и удалить данные можно командой `make clean`. Она удаляет локальные данные платформы и пароли — используйте осторожно.
+## Состав репозитория
 
-## Архитектура
+| Путь | Назначение |
+|---|---|
+| `team/pit/geometry.py` | Геометрия карьера: рампы, забои, дороги (метры) |
+| `team/pit/sim.py` | Модель рейса, диспетчер, два мира (с диспетчером / фиксированные назначения), сценарии, KPI |
+| `team/pit/twins.py` | Описание 34 двойников и телеметрия (Ditto protocol) |
+| `team/simulator.py`, `team/setup_twins.py` | Публикация телеметрии в MQTT; создание двойников в Ditto |
+| `team/console/` | Консоль: 3D-стенд (three.js вендорен, CDN не нужен), прокси к Ditto, управление сценариями |
+| `team/dashboard.json`, `team/make_dashboard.py` | Дашборд Grafana |
+| `team/compose.yml`, `team/Dockerfile` | Оверлей к `deploy/compose/` |
+| `team/tests/` | Тесты и пакетная проверка эффекта диспетчера |
+| `SUBMISSION.md`, `presentation.pdf` | Описание решения и презентация |
 
-`team/openpit/twins.json` → `setup_twins.py` → Eclipse Ditto; `simulator.py` → MQTT → Ditto → Telegraf → InfluxDB → Grafana. `scene.py` читает актуальные двойники через Ditto API и отображает пространственную схему карьера. Симуляция использует синтетические параметры и предназначена для демонстрации, а не для реального управления техникой.
-
-Дополнительное описание и ограничения — в `SUBMISSION.md`.
+Платформа: [aleka07/openegiz](https://github.com/aleka07/openegiz) (OpenEgiz v1.0.4, документация — [OPENEGIZ.md](OPENEGIZ.md)).
+Пример рудника `examples/mine` не используется. Лицензия решения — MIT, см. [LICENSE](LICENSE).
